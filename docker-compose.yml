@@ -1,0 +1,22 @@
+services:
+  lane-detection:
+    build:
+      context: .
+    image: lane-detection-poc:latest
+    container_name: lane-detection-poc
+    # GPU 사용. 윈도우 Docker Desktop + WSL2 + NVIDIA Container Toolkit 필요.
+    # GPU 없으면 deploy 블록 통째로 주석 처리하면 CPU 모드로 부팅 (속도는 떨어짐).
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - .:/workspace
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+    # `docker compose run --rm lane-detection bash` 로 상호작용 셸.
+    # 또는 `docker compose up -d` + `docker compose exec lane-detection bash`.

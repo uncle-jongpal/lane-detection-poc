@@ -1,0 +1,33 @@
+# PyTorch — Docker 이미지에서 CUDA 12.1 + torch 2.1 이 이미 설치돼있다고 가정.
+# 호스트에 직접 설치 시:
+#   pip install torch==2.1.0 torchvision==0.16.0 --index-url https://download.pytorch.org/whl/cu121
+
+# 영상 I/O 및 시각화
+opencv-python==4.10.0.84
+numpy==1.26.4
+Pillow==10.4.0
+
+# 모델 의존성 — Ultra-Fast / CLRNet 양쪽 다
+mmcv==2.1.0
+mmengine==0.10.4
+addict==2.4.0
+yacs==0.1.8
+shapely==2.0.4
+scipy==1.13.1
+scikit-learn==1.5.1
+tqdm==4.66.5
+
+# 다운로드 / 진행률
+requests==2.32.3
+gdown==5.2.0
+
+# 설정 파일 / 표
+pyyaml==6.0.2
+pandas==2.2.2
+tabulate==0.9.0
+
+# 시각화 / 보고서
+matplotlib==3.9.2
+
+# YOLOPv2 — Ultralytics 또는 자체 fork 둘 다 가능
+# (run-time 에 git clone 으로 받으므로 여기는 nothing)

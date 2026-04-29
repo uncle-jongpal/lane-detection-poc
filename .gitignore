@@ -1,0 +1,23 @@
+# 영상·결과·모델 가중치는 큰 용량이라 repo 에서 제외 — 사용자가 별도 다운/배치
+videos/input/*
+videos/output/*
+!videos/input/.gitkeep
+!videos/output/.gitkeep
+results/*.csv
+!results/.gitkeep
+weights/*
+!weights/README.md
+!weights/.gitkeep
+
+# 모델 외부 repo (Dockerfile 에서 build 시 clone)
+external/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.env
+
+# IDE
+.vscode/
+.idea/
