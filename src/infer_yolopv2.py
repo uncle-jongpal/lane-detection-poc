@@ -121,10 +121,10 @@ def main():
                 inp, r, pad = preprocess(frame)
                 inp = inp.to(device)
                 with torch.no_grad():
-                    pred, anchor_grid, seg, ll = net(inp)
+                    _det, seg, ll = net(inp)
                 # seg = drivable area mask, ll = lane line mask (둘 다 [1,2,H,W])
                 drivable_mask = seg.argmax(1)[0].cpu().numpy()    # 0 bg, 1 drivable
-                lane_mask = ll.argmax(1)[0].cpu().numpy()         # 0 bg, 1 lane
+                lane_mask = (ll[0,0] > 0.5).cpu().numpy().astype('uint8')  # 1-channel sigmoid
 
                 # letterbox 역변환 → 원본 좌표
                 H, W = reader.height, reader.width

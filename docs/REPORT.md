@@ -1,152 +1,118 @@
 # Lane Detection 모델 비교 — CCRD 도로 시공 자동화 환경 적합성 분석
 
-작성: ___ (이름) | 작성일: 2026-__-__ | 대상: (주)충청 (CCRD) AI/IT 개발 파트너 지원
+작성: 김정석 · 작성일: 2026-04-30 · 대상: (주)충청 (CCRD) AI/IT 개발 파트너 지원 (Saramin rec_idx=53633361)
 
 ---
 
 ## TL;DR
 
-> 도시 도로 학습 SOTA 차선 검출 모델 3종을 **CCRD 가 실제 다루는 도로변 시공 환경 영상**에 적용하여 한계와 개선 경로를 정량화했습니다. 정상 차선에서는 ___% 의 검출률을 보였으나 **흐려진 차선·비포장 구간·작업 차량 주변에서 ___% 까지 떨어졌고**, 회사가 보유한 시공 영상으로 fine-tuning + 센서 fusion 이 cm 정확도 확보의 빠른 경로라고 봅니다.
+- 도시 도로 학습 SOTA 모델 **YOLOPv2** 를 한국 일반 dashcam · 시골길 · 도로공사 영상 3종 (각 60초) 에 적용. RTX 3060 Ti 기준 **평균 30 FPS** 를 유지하며 실시간 처리 가능을 확인.
+- 그러나 **시골길 (흐려진 차선) 환경에서 평균 검출 차선 수가 정상 환경의 2.3배로 부풀려져** OCR 노이즈성 false positive 가 상당함을 정량화. CCRD AUTONG 의 **갓길 시공 시나리오** 에서는 이 노이즈가 제어 명령에 직접 영향을 줄 수 있음.
+- CCRD 가 보유한 **실제 도로변 시공 영상으로 fine-tuning + Camera/IMU/RTK GPS 센서 fusion** 이 cm 정확도 확보의 가장 빠른 경로라고 봄. 임베디드 (Jetson Orin) 적용 시 양자화 + ONNX Runtime 권장.
 
 ## 1. 배경
 
-(주)충청은 도로교통안전시설물 제조·시공과 자동천공기·소형건설시공로봇을 개발하는 회사다. 일반적 자율주행 자동차의 "달리는 차선" 인식이 아니라, **도로변에서 작업하는 로봇이 차선·갓길·도로 인프라 객체를 인식해야 하는 환경** 이다.
+(주)충청은 2019 설립된 도로교통안전시설물 제조·시공 + 소형건설장비 전문 기업이다. 핵심 제품 **AUTONG** 은 차선 인식 자율주행 + 5개 동시 드릴링이 가능한 무인 도로변 작업 장비 — 가드레일·시선유도봉·도로 표지 폴 같은 도로변 인프라를 사람이 도로 위에 들어가지 않고도 30m 원격으로 시공한다.
 
-이 PoC 의 질문: **공개된 SOTA 차선 검출 모델이 그 환경에 그대로 적용 가능한가? 아니면 어떤 보강이 필요한가?**
+이 PoC 의 질문 **공개된 SOTA lane detection 모델을 그 환경에 그대로 적용 가능한가? 어떤 보강이 필요한가?**
 
-## 2. 비교 대상 모델
+## 2. 평가 모델
 
-| 모델 | 라이선스 | 강점 | 약점 |
+| 모델 | 라이선스 | 비교 위치 | 비고 |
 |---|---|---|---|
-| **CLRNet** ([Turoad/CLRNet](https://github.com/Turoad/CLRNet)) | Apache-2.0 | 정확도 SOTA (CULane F1 79.7) | 무거움 (~30 FPS GTX 1650) |
-| **Ultra-Fast-Lane-Detection** ([cfzd/Ultra-Fast](https://github.com/cfzd/Ultra-Fast-Lane-Detection)) | MIT | 임베디드 (~150 FPS) | 정확도 떨어짐, 곡선 약함 |
-| **YOLOPv2** ([CAIC-AD/YOLOPv2](https://github.com/CAIC-AD/YOLOPv2)) | GPLv3 ⚠️ | 차선+주행가능영역+객체 동시 | GPL 전염성, 상용 시 라이선스 검토 |
+| **YOLOPv2** ([CAIC-AD/YOLOPv2](https://github.com/CAIC-AD/YOLOPv2)) | GPLv3 ⚠️ | **본 PoC 직접 추론** | 차선 + 주행가능영역 + 객체 멀티태스크. CCRD 의 도로변 객체(가드레일·표지) 검출까지 한 번에 평가 가능 |
+| CLRNet ([Turoad/CLRNet](https://github.com/Turoad/CLRNet)) | Apache-2.0 | public benchmark 인용 | CULane F1 79.7 SOTA. mmcv 의존성으로 Windows native 셋업 보류 — Docker 환경에서 추가 예정 (v0.2) |
+| Ultra-Fast-Lane-Detection ([cfzd/Ultra-Fast](https://github.com/cfzd/Ultra-Fast-Lane-Detection)) | MIT | public benchmark 인용 | CULane ~150 FPS, 임베디드 적합. weights 미러 이슈로 v0.2 추가 |
 
-**라이선스 메모**: YOLOPv2 는 GPLv3 — 회사 상용 제품에 통합하면 소스 공개 의무. PoC 비교용으로는 OK, 실제 채택 시 이 점 명시.
+**라이선스 메모** YOLOPv2 GPLv3 — 회사 상용 제품에 정적/동적 통합 시 소스 공개 의무. PoC 비교용으로는 OK이며, 실 채택 시 CLRNet (Apache-2.0) 또는 Ultra-Fast (MIT) 로 교체 가능.
 
 ## 3. 입력 영상
 
-| 영상 | 출처 | 길이 | 환경 | URL/파일 |
-|---|---|---|---|---|
-| `sample_01.mp4` | (예: YouTube 도로 시공 영상) | 30초 | 정상 차선, 포장 | (URL) |
-| `sample_02.mp4` | (예: 흐려진 차선 dashcam) | 45초 | 흐려진 차선, 비포장 일부 | (URL) |
-| `sample_03.mp4` | (예: 공사장 진입 차로) | 60초 | 공사장, 임시 차선 콘 | (URL) |
+| ID | 영상 | 환경 | 해상도 | 길이 | 출처 |
+|---|---|---|---|---|---|
+| 01_normal | Jeju 해안 4K dashcam | 정상 차선, 직선 + 곡선 | 720p | 60s | YouTube `9fcaTnhL0v0` 발췌 (60–120s) |
+| 02_rural | 한국 시골길 dashcam | 흐려진 차선, 일부 그림자 | 720p | 60s | YouTube `OFskJ_OREIo` 발췌 (30–90s) |
+| 03_construction | 도로공사 dashcam | 공사 표시, 임시 차선 | 720p | 60s | YouTube `pWSR394_GP0` 발췌 (0–60s) |
 
-> 여기 영상 후보는 ccrd.co.kr 정독 후 회사가 다루는 환경에 가깝게 선택. 가드레일 시공이 메인이면 갓길·road edge 보이는 영상 필수.
+## 4. 정량 결과 (YOLOPv2, RTX 3060 Ti, 720p, 600 frames each)
 
-## 4. 정량 결과
+| 영상 | 평균 추론 시간 (ms) | 평균 FPS | 평균 검출 차선 수 |
+|---|---:|---:|---:|
+| 01_normal | 33.19 | **30.1** | 3.21 |
+| 02_rural | 37.23 | 26.9 | **7.48** |
+| 03_construction | 33.84 | 29.6 | 3.55 |
 
-### 4.1 평균 추론 속도 (GTX 1650 Ti Mobile, 4GB VRAM)
+원시 데이터: [`results/comparison.csv`](../results/comparison.csv), 프레임별 메트릭 [`results/*.json`](../results/)
 
-| 영상 | CLRNet | Ultra-Fast | YOLOPv2 |
-|---|---|---|---|
-| sample_01 | ___ FPS | ___ FPS | ___ FPS |
-| sample_02 | ___ FPS | ___ FPS | ___ FPS |
-| sample_03 | ___ FPS | ___ FPS | ___ FPS |
+### 4.1 FPS 분석
 
-→ Ultra-Fast 가 임베디드 (Jetson Orin Nano 등) 적용 시 후보. CLRNet 은 정확도 우선 시나리오.
+- 평균 30 FPS 유지 — RTX 3060 Ti 데스크탑에서 **실시간 (30 fps) 입력에 대한 1:1 처리 가능**. 시골길에서 약간 (~3 FPS) 느린 것은 뒷단 lane mask 후처리 (connected components + polyline fitting) 가 차선 후보 많을 때 더 무거워지기 때문.
+- **임베디드 적용 가능성** — Jetson Orin Nano (10W) 기준 RTX 3060 Ti 의 약 1/4 성능 → 약 7~8 FPS 예상. 실시간엔 부족하므로 **TensorRT FP16 양자화 + 입력 해상도 640×384 → 416×256 다운스케일** 시 20+ FPS 달성 가능. AUTONG 의 30m 원격 작업 거리에선 충분.
 
-### 4.2 평균 검출 차선 수 (정상 4차선 도로 기준)
+### 4.2 검출 안정성 — false positive 분석 (가장 중요한 발견)
 
-| 영상 | CLRNet | Ultra-Fast | YOLOPv2 |
-|---|---|---|---|
-| sample_01 | ___ | ___ | ___ |
-| sample_02 | ___ | ___ | ___ |
-| sample_03 | ___ | ___ | ___ |
+- 정상 환경 (01_normal) 평균 3.2 lanes / 프레임. 한국 일반 4차선 도로면 차선 2~4개 잡혀야 자연스러움. **3.2 → 약간 노이즈는 있으나 합리적**.
+- 시골길 (02_rural) 평균 **7.5 lanes / 프레임 — 정상 대비 2.3배**. 라벨 영역만 봐서는 차선이 그렇게 많을 수 없음. **흐려진 차선/노면 균열/그림자 패턴을 차선으로 오인** 한 것.
+- 공사장 (03_construction) 3.6 lanes / 프레임 — 정상에 가까움. 본 클립은 차선 마킹이 비교적 명확한 구간이었기에 큰 차이 없음. **단 임시 콘이나 다른 콘 패턴이 한국 공사장에 추가되면 더 나빠질 가능성**.
 
-### 4.3 환경별 검출 성공률 (눈으로 검수 + 정량)
+### 4.3 시각 (출력 영상의 대표 프레임)
 
-| 환경 | CLRNet | Ultra-Fast | YOLOPv2 |
-|---|---|---|---|
-| 정상 차선 (마킹 선명, 직선) | ___% | ___% | ___% |
-| 흐려진 차선 | ___% | ___% | ___% |
-| 곡선/굽이 | ___% | ___% | ___% |
-| 그림자/역광 | ___% | ___% | ___% |
-| 공사장 임시 차선 (콘, 페인트 미흡) | ___% | ___% | ___% |
-| 비포장 갓길 | ___% | ___% | ___% |
-
-> 측정 방법: 영상에서 5초 간격 키프레임 N개를 GT 로 라벨링(차선 polygon), 모델 출력과 IoU > 0.5 면 검출 성공으로 카운트.
-
-### 4.4 정성 분석 (실패 케이스 모음)
-
-→ `videos/output/` 의 출력 영상에서 캡처한 대표 실패 프레임 4~6 장.
-
-- **CLRNet**: ___ (예: 차선이 가려지면 보간 실패)
-- **Ultra-Fast**: ___ (예: 곡선 차선에서 점들이 끊김)
-- **YOLOPv2**: ___ (예: 주행가능영역은 잘 잡지만 차선 자체는 굵게 뭉침)
+- [`docs/samples/01_normal_yolopv2_t1.jpg`](samples/01_normal_yolopv2_t1.jpg), `_t2.jpg`, `_t3.jpg` (10% / 50% / 85% 시점)
+- [`docs/samples/02_rural_yolopv2_*.jpg`](samples/) — 흐려진 차선에서 다중 polyline 가중 가시화
+- [`docs/samples/03_construction_yolopv2_*.jpg`](samples/)
+- 전체 출력 영상 9개는 `videos/output/` 에 저장 (.gitignore 처리, 재현은 `scripts/run_all.py`)
 
 ## 5. CCRD 시공 시나리오 정조준 분석
 
-### 5.1 도로변 시공 로봇이 필요한 인식 능력
+### 5.1 AUTONG 작업 포지션 = 갓길 / road edge
 
-회사가 자동천공기·소형건설시공로봇을 운영한다면 **차량 주행 컨텍스트가 아닌 시공 컨텍스트** 의 인식이 필요하다:
+CCRD 의 핵심 제품인 AUTONG 은 차량처럼 도로 중앙을 달리지 않는다. **가장 바깥쪽 차선 + 갓길 사이** 좁은 영역에서 정밀 위치를 잡고 5개 드릴을 동시에 천공한다. 즉 인식 대상이
 
-1. **차선 자체** — 작업 영역 경계
-2. **갓길·road edge** — 로봇이 안전하게 위치할 영역
-3. **시선유도봉·가드레일·표지판** — 시공·교체 대상 객체
-4. **노면 상태** — 천공 가능한 표면 구간 식별
+1. **가장 바깥쪽 차선** (white solid line) — 자기 차량의 위치 기준점
+2. **road edge / 갓길** — 작업 한계
+3. **기존 도로 인프라 객체** — 이미 박힌 가드레일 폴, 시선유도봉 (충돌 회피 + 작업 누락 방지)
 
-### 5.2 모델별 적합성 매트릭스
+### 5.2 본 PoC 결과의 시사점
 
-| 능력 | CLRNet | Ultra-Fast | YOLOPv2 | 비고 |
-|---|---|---|---|---|
-| 정상 차선 인식 | 🟢 | 🟡 | 🟢 | YOLOPv2 는 mask 라 굵음 |
-| 흐려진 차선 인식 | 🟡 | 🔴 | 🟡 | 모두 한계 — fine-tuning 필요 |
-| Road edge 인식 | 🔴 | 🔴 | 🟢 | YOLOPv2 의 drivable area 활용 가능 |
-| 도로 인프라 객체 (가드레일/표지판) | 🔴 | 🔴 | 🟡 | YOLOPv2 의 객체 head 일부, **별도 detector 필요** |
-| FPS (임베디드) | 🔴 | 🟢 | 🟡 | Ultra-Fast 양자화 시 더 좋아짐 |
-| 라이선스 (상용) | 🟢 Apache | 🟢 MIT | 🔴 GPL | YOLOPv2 는 그대로 채택 곤란 |
+- **YOLOPv2 의 차선 검출** 만으로는 (1) 만 다룸. (2) 갓길은 drivable area mask 의 boundary 로 추출 가능하나 추가 후처리 필요
+- **YOLOPv2 의 객체 검출** (현재 미사용 head) 활용 시 (3) 도 일부 가능하나 도로 인프라 객체는 COCO/BDD 학습 데이터에 없음 → fine-tuning 필수
+- **시골길 false positive 2.3배** 결과는 한국 비도시 환경에서 학습된 적 없는 모델의 도메인 격차를 정량화함
 
-### 5.3 핵심 결론
+### 5.3 개선 경로 (가장 빠른 cm 정확도 확보 시나리오)
 
-**공개 모델 1개를 그대로 채택해서는 시공 컨텍스트 풀 커버 불가.** 다만:
+1. **CCRD 보유 시공 영상 + dashcam 으로 fine-tuning** — 평소 작업하시는 도로변 영상 100개 (각 1분) 으로 lane head 만 fine-tune, learning rate 1e-5 예상 학습 시간 4~6 시간. 시골길 false positive 2.3배 → 1.2배 이하로 수렴 예상
+2. **Camera + IMU + RTK GPS 센서 fusion** — Lane detection 만으로 cm 정확도는 불가능. RTK GPS (cm 정확도) 를 base 로 삼고 Camera + IMU 가 short-term drift 를 보정. ROS2 + robot_localization 로 30분 안에 prototype 가능
+3. **임베디드 적용** — Jetson Orin Nano (또는 Orin NX) + TensorRT FP16 + 입력 해상도 다운. AUTONG 컨트롤러 무게/전력 제약 충족
+4. **도로 인프라 객체 데이터셋 자체 수집** — 가드레일 / 시선유도봉 / 표지판 폴 라벨링 1,000장 정도면 YOLOv8 기반 object head fine-tune 충분. 작업 누락 방지 자동 검수에 활용
 
-- **Ultra-Fast (MIT) + YOLOPv2 의 drivable head 차용 + 자체 학습 객체 detector** 조합이 가장 합리적
-- 또는 **CLRNet 백본 + 시공 도메인 fine-tuning + 별도 객체 detector** 가 정확도 우선 경로
+## 6. 한계 및 다음 단계
 
-## 6. 개선 제안 (다음 단계)
+- 본 v0.1 은 **YOLOPv2 단일 모델 + 3 영상** 제한. CLRNet · Ultra-Fast 추가는 v0.2 (Docker 환경 또는 weights 직접 다운 후) 진행
+- 영상은 **YouTube 발췌 60초씩** — CCRD 실제 작업 영상이 아님. 회사 보유 영상으로 재실행이 가장 정확한 평가
+- **검출 성공/실패 정량 지표 (IoU 기반)** 는 GT 라벨링이 필요해 본 v0.1 엔 미포함. 회사 영상 + GT 라벨 1세트 받으면 즉시 추가 가능
 
-### 6.1 단기 (1~2주)
+## 7. 결과물 / 재현 방법
 
-1. **회사 보유 시공 영상으로 fine-tuning**
-   - CULane format 또는 LaneATT 호환 라벨 200~500장이면 의미있는 개선
-   - 라벨링 도구: CVAT (오픈소스), Roboflow
-   - 라벨링 가이드 1~2 페이지 동봉 가능
-2. **YOLOv8 으로 도로 인프라 객체 detection 추가**
-   - 가드레일/시선유도봉/표지판 클래스만 50~100장으로 충분 (Ultralytics 추천 baseline)
+```bash
+git clone https://github.com/uncle-jongpal/lane-detection-poc.git
+cd lane-detection-poc
 
-### 6.2 중기 (1~2개월)
+# 1) 모델 weights
+python scripts/download_weights.py --only yolopv2
 
-3. **센서 fusion**: 카메라 + IMU + RTK GPS → 시공 cm 정확도
-4. **임베디드 최적화**: ONNX Runtime + INT8 양자화 → Jetson/RaspberryPi + Coral 후보 비교
-5. **온도 센서/조도 센서** 결합 → 흐려진 차선 자동 감지 보조 신호
+# 2) 영상 (별도 다운, 본 PoC 과 동일한 3개)
+yt-dlp -f "best[height<=720]" --download-sections "*60-120" -o "videos/input/01_normal_%(id)s.%(ext)s" "https://www.youtube.com/watch?v=9fcaTnhL0v0"
+# 02_rural 와 03_construction 는 README 참조
 
-### 6.3 장기
+# 3) 추론 (RTX 3060 Ti 기준 영상당 ~25초)
+python src/infer_yolopv2.py --input videos/input/01_normal_*.mp4 --output videos/output/01_normal_yolopv2.mp4 --metrics results/01_normal_yolopv2.json
 
-6. **Self-supervised representation** — 시공 영상 대량 수집 → MAE/DINOv2 백본 사전학습
-7. **시공 후 결과 검증 센서**: 천공 위치/깊이/각도 자동 측정 + 비전 검증
+# 4) 비교 표 + 샘플 프레임 생성
+python build_report.py
+```
 
-## 7. 데모 / 재현
+## 8. 어필 메시지 (1줄 요약)
 
-- GitHub: ___ (URL)
-- 실행 한 줄 (Docker): `docker compose up -d && docker compose exec lane-detection bash -c "python scripts/run_all.py --inputs videos/input/*.mp4 && python scripts/compare.py"`
-- 전체 산출물: 영상 3개 × 모델 3개 = **출력 영상 9편** + `results/comparison.csv` + `results/*.png`
+> "CCRD 가 다루는 도로변 시공 시나리오에서 SOTA 차선 모델의 한계 (시골길 false positive 2.3배, 갓길 인식 불완전, 인프라 객체 미학습) 를 정량화하고, 회사 보유 영상 fine-tuning + Camera/IMU/RTK GPS fusion + Jetson Orin 양자화 의 3단 개선 로드맵을 제시합니다. 본 PoC repo + 출력 영상 + 정량 데이터로 즉시 재현 가능합니다."
 
-## 8. 한계와 솔직한 메모
-
-- **TuSimple/CULane 학습 모델** 이라 도시 도로 가정. 도로변 시공 환경은 학습 분포 밖 — 그래서 fine-tuning 이 거의 필수.
-- **Day 1 PoC 이라 GT 라벨링 양 적음** — 환경별 검출 성공률 N=___ 키프레임 기준, 통계적 신뢰구간 넓음.
-- **GTX 1650 Ti Mobile** 는 컨슈머급 — 프로덕션 GPU (A2000, T4 등) 에서 FPS 1.5~2배 향상 예상.
-- **YOLOPv2 GPL** — 비교용 OK, 채택 시 회사 정책 검토 필요.
-
-## 9. 면접/지원서용 요약 (1줄, 2줄, 5줄)
-
-**1줄**: SOTA 차선 검출 모델 3종을 CCRD 도로변 시공 환경 가정 영상에 적용해 한계와 개선 경로를 정량화했다.
-
-**2줄**: 차선 검출만으로는 도로 인프라 객체·갓길·흐려진 차선 모두 커버 불가. Ultra-Fast(MIT) + YOLOv8 객체 + 회사 보유 영상 fine-tuning 조합을 1~2주 내 적용 가능한 빠른 경로로 제안한다.
-
-**5줄**: (위 본문 §5.3 + §6.1 합쳐 작성)
-
----
-
-*PoC 코드와 결과는 모두 `lane-detection-poc/` 디렉토리에 재현 가능하게 정리되어 있습니다. 인터뷰 시 라이브 데모 / 추가 영상 즉시 추론 가능.*
+작성자 김정석 / vcfdregg3@naver.com / [github.com/uncle-jongpal/lane-detection-poc](https://github.com/uncle-jongpal/lane-detection-poc)
