@@ -1,4 +1,4 @@
-# Lane Detection 모델 비교 — CCRD 도로 시공 자동화 환경 적합성 분석
+# Lane Detection 3 모델 비교 — CCRD 도로 시공 자동화 환경 적합성 분석
 
 작성: 김정석 · 작성일: 2026-04-30 · 대상: (주)충청 (CCRD) AI/IT 개발 파트너 지원 (Saramin rec_idx=53633361)
 
@@ -6,29 +6,39 @@
 
 ## TL;DR
 
-도시 도로 학습 SOTA 모델 **YOLOPv2** 를 환경 노이즈 강도가 다른 한국 dashcam 영상 3종 (각 60초, 600프레임) 에 적용
+3개 SOTA / lightweight 차선·주행가능영역 모델을 한국 dashcam 영상 3종 (각 60초, 600프레임, 노이즈 강도 점진 증가) 에 적용해 RTX 3060 Ti 에서 직접 측정
 
-- **명확한 도시 차선** — 평균 30 FPS · 3.77 차선 검출. 정상 동작
-- **차선 도색 없는 시골 2차선 도로** — 평균 33.7 FPS · **0.09 차선 검출** — 99% 프레임에서 차선 미검출. **사실상 작동 불능**
-- **폭우 야간** — 평균 32 FPS · **0.99 차선 검출** — 정상 대비 -74%. 신호등·반사 불빛만 있는 환경에서도 1개 정도만 간신히 인식
+| | YOLOPv2 (FP32) | HybridNets (FP32) | TwinLiteNet+ Nano (FP16) |
+|---|---|---|---|
+| Params | ~36M | ~13M | **0.03M** |
+| Weights | 156MB | 54MB | **0.2MB** |
+| 평균 FPS (3 영상) | 31.9 | **7.4** | **44.3** |
+| 평균 검출 차선 | 1.62 | 1.39 | 3.28 |
 
-CCRD AUTONG 의 갓길 시공 시나리오는 위 두 노이즈 환경의 합집합 (시골/지방도 + 야간/우천 작업 가능성) 에 정확히 해당. **공개 SOTA 모델만으로는 fallback safety margin 부족**, 회사 보유 시공 영상으로 fine-tuning + Camera/IMU/RTK GPS 센서 fusion + Jetson Orin 양자화 의 3단 보강이 cm 정확도 확보의 가장 빠른 경로라고 봄.
+핵심 발견
+
+1. **TwinLiteNet+ Nano 는 YOLOPv2 의 1/1200 크기인데도 RTX 3060 Ti 에서 1.4배 빠름 (44 FPS vs 32 FPS) + 노이즈 환경 응답성 더 높음**. CCRD AUTONG 의 Jetson Orin Nano 임베디드 환경에 가장 적합한 후보
+2. **HybridNets 는 멀티태스크 (객체 검출 추가) 비용으로 7.4 FPS 까지 떨어짐**. 임베디드엔 부적합
+3. **차선 부재 환경 (시골) 에서 모델별 응답이 갈림** — YOLOPv2 / HybridNets 는 거의 0 검출 (silent failure), TwinLiteNet+ 는 2.25 검출 (실제 차선 부재이므로 일부 false positive 가능성, GT 라벨링으로 추가 검증 필요)
+4. **모든 모델이 폭우 야간에서 baseline 대비 -50%~-95% 의 검출 붕괴** — 영상 노이즈 환경에선 lane detection 단독 신뢰 불가, RTK GPS + IMU fusion 필수
 
 ## 1. 배경
 
-(주)충청은 2019 설립된 도로교통안전시설물 제조·시공 + 소형건설장비 전문 기업이다. 핵심 제품 **AUTONG** 은 차선 인식 자율주행 + 5개 동시 드릴링이 가능한 무인 도로변 작업 장비 — 가드레일·시선유도봉·도로 표지 폴 같은 도로변 인프라를 30m 원격으로 시공한다.
+(주)충청은 도로교통안전시설물 제조·시공 + 소형건설장비 전문 기업이고, 핵심 제품 **AUTONG** 은 차선 인식 자율주행 + 5개 동시 드릴링이 가능한 무인 도로변 작업 장비. 갓길 / road edge 환경에서 가드레일·시선유도봉·도로 표지 폴 같은 도로변 인프라를 30m 원격으로 시공한다.
 
-이 PoC 의 질문 — **공개 SOTA lane detection 모델을 그 환경에 그대로 적용 가능한가? 노이즈 환경에서 어떻게 무너지는가?**
+이 PoC 의 질문 — **공개 SOTA 차선 모델들이 그 환경에 그대로 적용 가능한가? 임베디드 컨트롤러 (Jetson Orin Nano 등) 에서는 어느 모델이 살아남는가?**
 
 ## 2. 평가 모델
 
-| 모델 | 라이선스 | 비교 위치 | 비고 |
-|---|---|---|---|
-| **YOLOPv2** ([CAIC-AD/YOLOPv2](https://github.com/CAIC-AD/YOLOPv2)) | GPLv3 ⚠️ | **본 PoC 직접 추론** | 차선 + 주행가능영역 + 객체 멀티태스크. CCRD 의 도로변 객체(가드레일·표지) 검출까지 한 번에 평가 가능 |
-| CLRNet ([Turoad/CLRNet](https://github.com/Turoad/CLRNet)) | Apache-2.0 | public benchmark 인용 | CULane F1 79.7 SOTA. mmcv 의존성으로 Windows native 셋업 보류 — Docker 환경에서 추가 예정 (v0.3) |
-| Ultra-Fast-Lane-Detection ([cfzd/Ultra-Fast](https://github.com/cfzd/Ultra-Fast-Lane-Detection)) | MIT | public benchmark 인용 | CULane ~150 FPS, 임베디드 적합. weights 미러 이슈로 v0.3 추가 |
+| 모델 | 라이선스 | Params | 입력 해상도 | 출력 |
+|---|---|---|---|---|
+| **YOLOPv2** ([CAIC-AD/YOLOPv2](https://github.com/CAIC-AD/YOLOPv2)) | GPLv3 ⚠️ | ~36M | 384×640 | 차선 + 주행가능영역 + 객체 |
+| **HybridNets** ([datvuthanh/HybridNets](https://github.com/datvuthanh/HybridNets)) | MIT | ~13M | 384×640 | 차선 + 주행가능영역 + 객체 |
+| **TwinLiteNet+ Nano** ([chequanghuy/TwinLiteNetPlus](https://github.com/chequanghuy/TwinLiteNetPlus)) | MIT | **0.03M** | 384×640 | 차선 + 주행가능영역 (객체 X) |
 
-라이선스 메모 — YOLOPv2 GPLv3 → 회사 상용 제품에 정적/동적 통합 시 소스 공개 의무. PoC 비교용으론 OK이며, 실 채택 시 CLRNet (Apache-2.0) 또는 Ultra-Fast (MIT) 로 교체 가능.
+라이선스 메모 — YOLOPv2 GPLv3 → 상용 통합 시 소스 공개 의무. CCRD 가 자사 제품에 포함하려면 HybridNets 또는 TwinLiteNet+ (둘 다 MIT) 가 깔끔.
+
+CLRNet / Ultra-Fast-Lane-Detection 검토 결과 — CLRNet 은 mmcv 의존 + GTX 1650 기준 30 FPS 로 임베디드 적합도 낮아 본 비교에서 제외. Ultra-Fast 는 Google Drive 호스팅 weights 가 비활성 상태 (cfzd 4년 전 모델). 본 PoC 는 weights 가 살아있고 임베디드 친화도 높은 3 모델 비교에 집중.
 
 ## 3. 입력 영상 — 노이즈 강도 점진 증가
 
@@ -38,33 +48,48 @@ CCRD AUTONG 의 갓길 시공 시나리오는 위 두 노이즈 환경의 합집
 | 02_rural | 대한민국 Rural Roads 4K | 시골 2차선, 차선 도색 거의 없음 | **높음 — 차선 부재** | 60s | YouTube `USmNjc8yyQo` 발췌 (180–240s) |
 | 03_rain_night | 폭우 야간 드라이빙 4K | 야간 + 폭우 + 와이퍼 자국 + 신호등 반사 | **극한 — 노이즈 + 야간 + 우천** | 60s | YouTube `cb3NnbT5y4s` 발췌 (300–360s) |
 
-## 4. 정량 결과 (YOLOPv2, RTX 3060 Ti, 720p, 600 frames each)
+## 4. 정량 결과 (RTX 3060 Ti, 720p, 600 frames each)
 
-| 영상 | 평균 추론 시간 (ms) | 평균 FPS | 평균 검출 차선 수 | baseline 대비 |
-|---|---:|---:|---:|---:|
-| 01_clear | 33.32 | **30.0** | 3.77 | 100% |
-| 02_rural | 29.70 | 33.7 | **0.09** | **2.4%** ⚠️ |
-| 03_rain_night | 31.23 | 32.0 | **0.99** | **26%** ⚠️ |
+### 4.1 추론 속도 (FPS)
+
+| 영상 | YOLOPv2 | HybridNets | TwinLiteNet+ Nano |
+|---|---:|---:|---:|
+| 01_clear | 30.0 | 7.4 | **40.0** |
+| 02_rural | 33.7 | 7.3 | **47.9** |
+| 03_rain_night | 32.0 | 7.5 | **45.0** |
+| **평균** | **31.9** | **7.4** | **44.3** |
+
+**Jetson Orin Nano (10W) 추정 FPS** — RTX 3060 Ti 의 약 1/4 성능 가정 시
+- YOLOPv2 → ~8 FPS (실시간 어려움)
+- HybridNets → ~2 FPS (실 운영 불가)
+- **TwinLiteNet+ Nano → ~11 FPS (실시간 가능)**
+
+### 4.2 평균 검출 차선 수
+
+| 영상 | YOLOPv2 | HybridNets | TwinLiteNet+ Nano |
+|---|---:|---:|---:|
+| 01_clear (baseline) | 3.77 | 3.91 | 5.54 |
+| 02_rural | 0.09 | 0.08 | **2.25** |
+| 03_rain_night | 0.99 | 0.19 | **2.04** |
+
+베이스라인 대비 노이즈 환경 응답률 (% of baseline)
+
+| 영상 | YOLOPv2 | HybridNets | TwinLiteNet+ Nano |
+|---|---:|---:|---:|
+| 02_rural | **2.4%** ⚠️ | **2.0%** ⚠️ | **40.6%** |
+| 03_rain_night | **26%** ⚠️ | **5%** ⚠️ | **37%** |
 
 원시 데이터 — [`results/comparison.csv`](../results/comparison.csv), 프레임별 메트릭 [`results/*.json`](../results/)
 
-### 4.1 FPS 일관성
-
-추론 시간은 30~33ms 로 노이즈 환경과 무관하게 일정. 즉 **detect 가 0개여도 inference 자체는 멀쩡히 도는 silent failure** — 시스템 외부에선 "잘 도는 것처럼 보이는" 위험한 상태. 이게 자율주행 시공 로봇에 그대로 들어가면 차선 못 본 채 작업 명령을 보내는 사고로 이어짐.
-
-→ 실 운영 시 **lane confidence threshold 외부 모니터링 + fallback 모드** 필수.
-
-### 4.2 환경별 검출 안정성
-
-- **01_clear (baseline)** 평균 3.77 lanes / 프레임. 한국 시내 4차선 도로면 3~4 차선 자연. 안정적
-- **02_rural** 평균 **0.09 lanes / 프레임 — 99% 프레임 검출 0**. 차선 마킹 자체가 없는 환경에서 모델은 거의 응답 못 함. 곡선 도로면이나 가드레일 라인을 차선으로 오인하는 sporadic 검출 0.09개
-- **03_rain_night** 평균 **0.99 lanes / 프레임 — 정상 대비 -74%**. 와이퍼 자국 + 빗방울 + 신호등 반사 + 백색 라인 잘 안 보이는 야간이라 model 이 잘해야 1개 lane 정도 잡음. 자율주행 차선 추적엔 turn signal 도 못 줄 수준
-
 ### 4.3 시각 (출력 영상의 대표 프레임)
 
-- [`docs/samples/01_clear_yolopv2_*.jpg`](samples/) — 주간 시내, 백색 차선 polyline + 주행가능영역 mask 정상
-- [`docs/samples/02_rural_yolopv2_*.jpg`](samples/) — 시골 2차선, polyline 거의 없음 (모델 전 detection 실패)
-- [`docs/samples/03_rain_night_yolopv2_*.jpg`](samples/) — 폭우 야간, 빗방울 반사 위에 sparse 한 polyline 1개 정도
+각 영상별 / 모델별 9 × 3 = 27 장 — [`docs/samples/`](samples/)
+
+### 4.4 결과 해석
+
+1. **YOLOPv2 / HybridNets 의 silent failure** — 시골 환경 (차선 부재) 에선 거의 응답 없음. FPS 는 일정하므로 외부에서 보면 "잘 도는 것처럼 보이는" 위험 상태. 폭우 야간도 비슷
+2. **TwinLiteNet+ Nano 의 강한 노이즈 robustness** — 작은 모델이 오히려 덜 무너짐. 다만 "차선 부재 영상에서 평균 2.25개 검출" 은 도로 가장자리 / 그림자 / 가드레일 라인을 차선으로 오인하는 false positive 가능성 — **GT 라벨링 없는 한 정확도 단언 불가**. 단순 "응답 빈도" 와 "정확도" 는 별개 지표
+3. **HybridNets 의 7.4 FPS** 는 의외 — multi-task (객체 검출까지) + EfficientNet-B3 backbone 비용. 같은 입력 해상도라도 YOLOPv2 의 1/4 속도. 임베디드엔 적합도 낮음
 
 ## 5. CCRD 시공 시나리오 정조준 분석
 
@@ -72,27 +97,28 @@ CCRD AUTONG 의 갓길 시공 시나리오는 위 두 노이즈 환경의 합집
 
 CCRD 의 핵심 제품인 AUTONG 은 차량처럼 도로 중앙을 달리지 않는다. **가장 바깥쪽 차선 + 갓길 사이** 좁은 영역에서 정밀 위치를 잡고 5개 드릴을 동시에 천공한다. 인식 대상은 (1) 가장 바깥쪽 차선 (2) road edge / 갓길 (3) 기존 가드레일·시선유도봉 객체 — 충돌 회피 + 작업 누락 방지.
 
-### 5.2 본 PoC 결과의 시사점 — silent failure 위험
+### 5.2 본 PoC 결과의 시사점
 
-위 02_rural / 03_rain_night 두 시나리오는 한국 도로변 시공 현장에 **빈번히 등장**한다
+1. **임베디드 모델 후보 = TwinLiteNet+ (Nano 또는 Small/Medium)**. YOLOPv2 / HybridNets 는 Jetson Orin 에서 실시간 한계
+2. **시골 / 야간 / 우천 작업** 에선 lane detection 단독 의존 위험 — RTK GPS + IMU fusion + 도로 인프라 객체 검출 (가드레일 / 시선유도봉) 보강 필수
+3. **silent failure 모니터링 layer** 필수 — lane confidence 또는 lane count 가 N 프레임 연속 임계값 미만이면 자동 정지 + 사람 호출
 
-1. 시공 대상 도로의 상당수는 시골/지방도 — 차선 도색이 흐려지거나 아예 없는 구간. **02_rural 의 0.09 lanes/프레임은 그 환경에서 모델이 사실상 사용 불가**임을 의미
-2. 야간 작업 또는 우천 작업 — 교통 차단 시간을 줄이려면 야간/이른 새벽 시공이 빈번. **03_rain_night 의 0.99 lanes/프레임은 모델 의존이 위험**함을 의미
-3. FPS 가 노이즈 환경에서도 변동 없이 일정하므로 **외부에서 보면 "잘 돌고 있는 것처럼 보이는" silent failure** 위험 — 시스템 모니터링 layer 가 반드시 lane confidence + count 를 함께 추적해야 함
+### 5.3 추천 모델 + 4단 개선 로드맵
 
-### 5.3 개선 경로 (가장 빠른 cm 정확도 확보 시나리오)
-
-1. **CCRD 보유 시공 영상 + dashcam 으로 fine-tuning** — 평소 작업하시는 도로변 영상 100~200개 (각 1분) 으로 lane head fine-tune. learning rate 1e-5, 학습 시간 4~6 시간. **02_rural 같은 마킹 부재 환경에서 road edge 와 갓길 boundary 를 검출하도록 보강** 가능
-2. **Camera + IMU + RTK GPS 센서 fusion** — Lane detection 만으로 cm 정확도는 불가능. RTK GPS (cm 정확도) 를 base 로 삼고 Camera + IMU 가 short-term drift 보정. ROS2 + robot_localization 로 30분 안에 prototype. **03_rain_night 같은 영상 노이즈 환경에서 RTK 가 backbone 역할 — 핵심**
-3. **임베디드 적용** — Jetson Orin Nano (10W) + TensorRT FP16 + 입력 해상도 다운스케일. 30m 원격 작업 거리에 충분
-4. **도로 인프라 객체 데이터셋 자체 수집** — 가드레일 / 시선유도봉 / 표지판 폴 라벨링 1,000장 정도면 YOLOv8 기반 object head fine-tune 충분. 작업 누락 방지 자동 검수에 활용
-5. **Lane confidence + count 모니터링 layer** — 모델 silent failure 검출. lane count = 0 또는 confidence < threshold 가 연속 N 프레임 발생하면 자동 정지 + 사람 호출
+1. **Base 모델로 TwinLiteNet+ 채택** (Small 또는 Medium, 정확도-속도 trade-off 검토 필요)
+2. **CCRD 보유 시공 영상 + dashcam 으로 fine-tuning** — 평소 작업하시는 도로변 영상 100~200개 (각 1분) 으로 lane head fine-tune. learning rate 1e-5, 학습 시간 4~6 시간. **02_rural 같은 마킹 부재 환경에서 road edge 와 갓길 boundary 를 검출하도록 보강** 가능
+3. **Camera + IMU + RTK GPS 센서 fusion** — Lane detection 만으로 cm 정확도는 불가능. RTK GPS (cm 정확도) 를 base 로 삼고 Camera + IMU 가 short-term drift 보정. ROS2 + robot_localization 로 30분 안에 prototype
+4. **임베디드 적용 + 모니터링 layer**
+   - TwinLiteNet+ → ONNX → TensorRT FP16 (TwinLiteNet+ 는 이미 FP16 inference 검증됨)
+   - Lane confidence + count + segmentation IoU 모니터링 layer 외부 add-on
+   - 이상 검출시 자동 정지 + 사람 호출
+5. **도로 인프라 객체 데이터셋 자체 수집** — 가드레일 / 시선유도봉 / 표지판 폴 라벨링 1,000장 정도면 YOLOv8-nano 기반 object head fine-tune 충분. 작업 누락 방지 자동 검수에 활용
 
 ## 6. 한계 및 다음 단계
 
-- 본 v0.2 는 **YOLOPv2 단일 모델 + 3 영상** 제한. CLRNet · Ultra-Fast 추가는 v0.3 (Docker 환경 + Ultra-Fast weights GitHub 미러 우회) 진행
-- 영상은 **YouTube 발췌 60초씩** — CCRD 실제 작업 영상이 아님. 회사 보유 영상으로 재실행이 가장 정확한 평가
-- **검출 성공/실패 정량 지표 (IoU 기반)** 는 GT 라벨링이 필요해 본 v0.2 엔 미포함. 회사 영상 + GT 라벨 1세트 받으면 즉시 추가 가능
+- 본 v0.3 은 3 모델 직접 비교까지 — **TensorRT FP16/INT8 양자화 측정** 은 v0.4 (다음 단계)
+- 영상 3개 × 60초 YouTube 발췌 — CCRD 실제 작업 영상이 아님. 회사 보유 영상으로 재실행이 가장 정확한 평가
+- **검출 성공/실패 정량 지표 (IoU 기반)** 는 GT 라벨링이 필요해 본 v0.3 엔 미포함. 회사 영상 + GT 라벨 1세트 받으면 즉시 추가 가능. **TwinLiteNet+ 의 차선 부재 영상에서 2.25 검출은 GT 없이 진위 단언 불가** — 다음 단계 우선순위
 
 ## 7. 결과물 / 재현 방법
 
@@ -100,23 +126,41 @@ CCRD 의 핵심 제품인 AUTONG 은 차량처럼 도로 중앙을 달리지 않
 git clone https://github.com/uncle-jongpal/lane-detection-poc.git
 cd lane-detection-poc
 
-# 1) 모델 weights
-python scripts/download_weights.py --only yolopv2
+# 1) 외부 모델 repo
+mkdir -p external && cd external
+git clone --depth 1 https://github.com/CAIC-AD/YOLOPv2.git
+git clone --depth 1 https://github.com/datvuthanh/HybridNets.git
+git clone --depth 1 https://github.com/chequanghuy/TwinLiteNetPlus.git
+cd ..
 
-# 2) 영상 (별도 다운, 본 PoC 과 동일한 3개)
+# 2) Python 환경 (CUDA 11.8 + PyTorch 2.5)
+conda create -n gpu python=3.11
+conda activate gpu
+pip install torch==2.5.0 torchvision --index-url https://download.pytorch.org/whl/cu118
+pip install opencv-python numpy gdown timm==0.6.13 efficientnet_pytorch albumentations \
+    prefetch_generator pretrainedmodels webcolors tensorboardX
+
+# 3) Weights
+python scripts/download_weights.py --only yolopv2
+curl -L -o weights/hybridnets.pth https://github.com/datvuthanh/HybridNets/releases/download/v1.0/hybridnets.pth
+python -c "import gdown; gdown.download_folder(id='1EqBzUw0b17aEumZmWYrGZmbx_XJqU-vz', output='weights/twinlitenetplus')"
+
+# 4) 영상
 yt-dlp -f "best[height<=720]" --download-sections "*120-180" -o "videos/input/01_clear_%(id)s.%(ext)s" "https://www.youtube.com/watch?v=WIQ9T2O7tNA"
 yt-dlp -f "best[height<=720]" --download-sections "*180-240" -o "videos/input/02_rural_%(id)s.%(ext)s" "https://www.youtube.com/watch?v=USmNjc8yyQo"
 yt-dlp -f "best[height<=720]" --download-sections "*300-360" -o "videos/input/03_rain_night_%(id)s.%(ext)s" "https://www.youtube.com/watch?v=cb3NnbT5y4s"
 
-# 3) 추론 (RTX 3060 Ti 기준 영상당 ~20초)
+# 5) 추론 (RTX 3060 Ti 기준 영상당 ~25초 / 모델별)
 python src/infer_yolopv2.py --input videos/input/01_clear_*.mp4 --output videos/output/01_clear_yolopv2.mp4 --metrics results/01_clear_yolopv2.json
+python src/infer_hybridnets.py --input videos/input/01_clear_*.mp4 --output videos/output/01_clear_hybridnets.mp4 --metrics results/01_clear_hybridnets.json
+python src/infer_twinlitenetplus.py --input videos/input/01_clear_*.mp4 --output videos/output/01_clear_twin_nano.mp4 --metrics results/01_clear_twin_nano.json --config nano
 
-# 4) 비교 표 + 샘플 프레임 생성
+# 6) 비교 표 + 샘플 프레임
 python build_report.py
 ```
 
 ## 8. 어필 메시지 (1줄 요약)
 
-> "CCRD 가 다루는 도로변 시공 시나리오에서 SOTA 차선 모델의 silent failure 한계 (시골 마킹 부재시 검출 -98%, 야간 우천시 -74%) 를 정량화하고, 회사 보유 영상 fine-tuning + Camera/IMU/RTK GPS fusion + Jetson Orin 양자화 + lane confidence 모니터링 의 4단 개선 로드맵을 제시합니다. 본 PoC repo + 출력 영상 + 정량 데이터로 즉시 재현 가능합니다."
+> "CCRD AUTONG 의 임베디드 시공 시나리오에 맞춰 3개 lane detection 모델 (YOLOPv2 / HybridNets / TwinLiteNet+ Nano) 을 한국 노이즈 등급 영상 3종에 직접 추론 + 정량 비교했습니다. **YOLOPv2 의 1/1200 크기인 TwinLiteNet+ Nano 가 같은 GPU 에서 1.4배 빠르고 노이즈 환경 응답성도 높아** Jetson Orin 임베디드 후보 1순위로 추천. silent failure 모니터링 + RTK GPS fusion + 회사 영상 fine-tuning 의 4단 로드맵으로 cm 정확도 확보 경로 제시."
 
 작성자 김정석 / vcfdregg3@naver.com / [github.com/uncle-jongpal/lane-detection-poc](https://github.com/uncle-jongpal/lane-detection-poc)
