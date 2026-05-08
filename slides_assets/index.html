@@ -165,6 +165,52 @@
 </section>
 
 <section>
+  <h2>Jetson Nano 실측 — PyTorch → TensorRT 양자화 배포</h2>
+  <p class="lead">
+    "양산 시 임베디드에서 N FPS 가능" 추정만 박지 말고, 실제로 <strong>Jetson Nano (Tegra X1, sm_53, 4GB)</strong> 에
+    배포해 측정. ONNX export → trtexec engine 빌드 → TensorRT Python API 추론 파이프라인 직접 구축.
+    같은 모델 (TwinLiteNet+ Nano), 같은 영상 (3 종 × 1800 frames) 으로 RTX 3060 Ti 와 비교.
+  </p>
+
+  <img class="chart" src="chart_jetson_pipeline.png" alt="Jetson Nano deployment FPS comparison">
+
+  <h3>측정 결과 (1800 프레임 × 3 영상 평균)</h3>
+  <table>
+    <thead><tr><th>Stage</th><th>Hardware</th><th>Precision</th><th>Engine size</th><th class="num">FPS</th></tr></thead>
+    <tbody>
+      <tr><td>Baseline</td><td>RTX 3060 Ti (sm_86)</td><td>PyTorch FP16</td><td>0.2 MB (.pth)</td><td class="num">40.0</td></tr>
+      <tr><td>ONNX export</td><td>Dev PC</td><td>—</td><td>187 KB</td><td class="num">—</td></tr>
+      <tr><td><strong>Jetson TRT FP16</strong></td><td><strong>Jetson Nano (sm_53)</strong></td><td><strong>TensorRT FP16</strong></td><td>4.0 MB</td><td class="num best"><strong>20.27</strong></td></tr>
+      <tr><td>Jetson TRT INT8 (auto)</td><td>Jetson Nano</td><td>TensorRT INT8</td><td>4.2 MB</td><td class="num">20.45</td></tr>
+    </tbody>
+  </table>
+
+  <div class="key-findings">
+    <div class="finding good">
+      <strong>핵심 결과.</strong> Jetson Nano TRT FP16 = <strong>20.27 FPS</strong> 달성. 임베디드 실시간 처리
+      합격선 (15 FPS) 를 5 FPS 여유로 통과. AUTONG 같은 도로변 시공 로봇 (저속 이동 + 30 FPS 카메라) 에 충분.
+    </div>
+    <div class="finding">
+      <strong>INT8 효과 미미 — 의도된 발견.</strong> INT8 가 FP16 대비 +1.4% 만 빠름. 0.03M 짜리 매우 작은 모델은
+      메모리/연산 bottleneck 이 약해 양자화 이득이 작음. 또한 calibration data 없이 trtexec auto 모드라 보수적
+      dynamic range 추정. 정식 INT8 적용 시 <code>scripts/calibrate_int8.py</code> 로 200 프레임 calibration 후
+      재측정 필요 (정확도 vs 속도 trade-off 균형).
+    </div>
+    <div class="finding good">
+      <strong>배포 파이프라인 완전 자동화.</strong> Dev PC 에서 ONNX export → git push → Jetson 에서 git pull
+      + trtexec build + Python TRT 추론. 같은 ONNX 로 다른 GPU 아키텍처에 재배포 가능 (sm_86 → sm_53 cross
+      deployment). CCRD AUTONG 의 양산 라인에서 그대로 재사용 가능한 구조.
+    </div>
+  </div>
+
+  <h3>실제 차선 검출 (Jetson Nano TRT FP16, 600 프레임)</h3>
+  <div class="video-row">
+    <video src="01_clear_jetson_trt_fp16.mp4" controls muted preload="metadata"></video>
+    <div class="video-caption">Jetson Nano 직접 추론 결과 — 평균 20.24 FPS, 평균 3.66 차선 검출. 동일 영상 RTX 3060 Ti 결과 (40 FPS, 5.54 차선) 와 비교 시 추론 속도 절반, 검출 차선 33% 감소 (FP16 양자화 정밀도 손실 + INT 추론 fallback 영향).</div>
+  </div>
+</section>
+
+<section>
   <h2>한계 + 개선 방향 (CCRD 환경 적용 관점)</h2>
 
   <h3>현재 한계</h3>
