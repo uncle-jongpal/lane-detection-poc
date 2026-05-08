@@ -21,3 +21,8 @@ __pycache__/
 # IDE
 .vscode/
 .idea/
+
+
+# slides_assets — HTML + 차트는 commit, mp4 는 제외 (용량)
+slides_assets/*.mp4
+

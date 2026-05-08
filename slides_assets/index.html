@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>차선 인식 PoC — CCRD 도로 시공 자동화 환경</title>
+<style>
+  :root {
+    --bg: #0d1018;
+    --card: #161b27;
+    --border: #2a3140;
+    --text: #e6edf3;
+    --muted: #8b96a8;
+    --accent: #4c8bf5;
+    --good: #55a868;
+    --warn: #c44e52;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; line-height: 1.6; }
+  header { padding: 64px 32px 40px; max-width: 1100px; margin: 0 auto; border-bottom: 1px solid var(--border); }
+  header .tag { font-size: 12px; color: var(--accent); letter-spacing: 0.15em; font-weight: 700; text-transform: uppercase; }
+  header h1 { font-size: 36px; margin: 12px 0 8px; line-height: 1.3; letter-spacing: -0.02em; }
+  header .meta { color: var(--muted); font-size: 14px; }
+  main { max-width: 1100px; margin: 0 auto; padding: 0 32px; }
+  section { padding: 48px 0; border-bottom: 1px solid var(--border); }
+  section:last-child { border-bottom: none; }
+  h2 { font-size: 22px; margin: 0 0 24px; letter-spacing: -0.01em; }
+  h3 { font-size: 16px; margin: 24px 0 8px; color: var(--accent); }
+  .lead { color: var(--muted); font-size: 15px; margin-bottom: 32px; }
+  .video-row video { width: 100%; height: auto; border-radius: 8px; background: #000; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }
+  .video-caption { font-size: 13px; color: var(--muted); margin-top: 8px; }
+  .chart { display: block; max-width: 100%; margin: 16px auto 32px; border-radius: 8px; background: white; padding: 8px; }
+  .key-findings { display: grid; grid-template-columns: 1fr; gap: 12px; }
+  .finding { padding: 16px 18px; background: var(--card); border-left: 3px solid var(--accent); border-radius: 6px; }
+  .finding strong { color: var(--text); }
+  .finding.warn { border-left-color: var(--warn); }
+  .finding.good { border-left-color: var(--good); }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14px; }
+  th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.best { color: var(--good); font-weight: 700; }
+  footer { padding: 32px; max-width: 1100px; margin: 0 auto; color: var(--muted); font-size: 13px; text-align: center; }
+  footer a { color: var(--accent); text-decoration: none; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="tag">자율주행 · 사전 PoC</div>
+  <h1>지원 전 직접 진행한 차선 인식 사전 검증</h1>
+  <div class="meta">3 개 SOTA 모델 × 3 개 한국 도로 영상 · RTX 3060 Ti · 600 frames each · 2026-04-29 ~ 30</div>
+</header>
+
+<main>
+
+<section>
+  <h2>왜 직접 돌려봤나</h2>
+  <p class="lead">
+    포지션을 알게 된 직후 "글만 작성하지 말고 직접 시도해보자" 는 생각으로 PoC 를 진행했습니다.
+    오픈소스 차선 인식 모델을 한국 도로 영상에 직접 적용해보며 도메인 이해도를 끌어올리고,
+    실제 도로 환경에서의 한계와 해결 방향을 직접 체감했습니다.
+  </p>
+
+  <div class="key-findings">
+    <div class="finding good">
+      <strong>핵심 발견 1.</strong> TwinLiteNet+ Nano (0.03M params) 가 YOLOPv2 (36M, 1200 배 큼) 보다 RTX 3060 Ti 에서
+      <strong>1.4 배 빠름 (44 vs 32 FPS)</strong> + 노이즈 환경 응답성 더 높음. CCRD AUTONG 의 Jetson Orin Nano 임베디드에 가장 적합.
+    </div>
+    <div class="finding warn">
+      <strong>핵심 발견 2.</strong> HybridNets 는 멀티태스크 (객체 검출 추가) 비용으로 7.4 FPS 까지 떨어짐 → 임베디드 부적합.
+    </div>
+    <div class="finding warn">
+      <strong>핵심 발견 3.</strong> 차선 부재 시골 환경에서 모델별 응답이 갈림 — YOLOPv2 / HybridNets 거의 0 검출 (silent failure),
+      TwinLiteNet+ 는 2.25 검출 (도로 가장자리 라인 인식).
+    </div>
+    <div class="finding warn">
+      <strong>핵심 발견 4.</strong> 모든 모델이 폭우 야간에서 baseline 대비 <strong>-50%~-95%</strong> 검출 붕괴
+      → lane detection 단독 신뢰 불가, RTK GPS + IMU fusion 필수.
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>3-Way 비교 영상 (좌: YOLOPv2 / 중: HybridNets / 우: TwinLiteNet+)</h2>
+
+  <h3>01_clear · 시내 주간 (baseline)</h3>
+  <div class="video-row">
+    <video src="01_clear_compare.mp4" controls muted preload="metadata" poster="01_clear_still.jpg"></video>
+    <div class="video-caption">백색 차선 명확. 3 모델 모두 정상 검출. 속도 차이 (HybridNets 가 절반 이하 FPS) 만 두드러짐.</div>
+  </div>
+
+  <h3>02_rural · 시골 2 차선 (차선 페인트 없음)</h3>
+  <div class="video-row">
+    <video src="02_rural_compare.mp4" controls muted preload="metadata" poster="02_rural_still.jpg"></video>
+    <div class="video-caption">실제 차선 페인트가 거의 없는 환경. YOLOPv2 / HybridNets 는 silent failure (0 검출). TwinLiteNet+ 는 도로 가장자리를 검출하려는 시도 보임.</div>
+  </div>
+
+  <h3>03_rain_night · 폭우 야간</h3>
+  <div class="video-row">
+    <video src="03_rain_night_compare.mp4" controls muted preload="metadata" poster="03_rain_night_still.jpg"></video>
+    <div class="video-caption">와이퍼 자국 + 신호등 반사 + 야간 노이즈. 모든 모델 검출 붕괴 (-50~-95%). lane 단독 운전 불가능.</div>
+  </div>
+</section>
+
+<section>
+  <h2>정량 결과</h2>
+
+  <h3>추론 속도 (RTX 3060 Ti, 720p, 600 frames each)</h3>
+  <img class="chart" src="chart_fps.png" alt="FPS bar chart">
+
+  <h3>차선 검출 응답 (평균 검출 차선 수 / 프레임)</h3>
+  <img class="chart" src="chart_lanes.png" alt="Avg lanes detected bar chart">
+
+  <h3>속도-품질 trade-off 맵</h3>
+  <img class="chart" src="chart_tradeoff.png" alt="Speed vs detection trade-off scatter">
+
+  <h3>요약 표</h3>
+  <table>
+    <thead><tr><th>모델</th><th>Params</th><th>Weights</th><th class="num">평균 FPS</th><th class="num">평균 검출 차선</th></tr></thead>
+    <tbody>
+      <tr><td>YOLOPv2</td><td>~36M</td><td>156 MB</td><td class="num">31.9</td><td class="num">1.62</td></tr>
+      <tr><td>HybridNets</td><td>~13M</td><td>54 MB</td><td class="num">7.4</td><td class="num">1.39</td></tr>
+      <tr><td>TwinLiteNet+ Nano</td><td><strong>0.03M</strong></td><td><strong>0.2 MB</strong></td><td class="num best">44.3</td><td class="num best">3.28</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>TwinLiteNet+ 변형 비교 — 작은 모델이 더 잘 잡는 역설</h2>
+  <p class="lead">
+    같은 영상 (01_clear) 으로 TwinLiteNet+ 의 4 개 변형 (Nano / Small / Medium / Large) 을 측정.
+    예상과 달리 <strong>큰 변형이 더 느리면서 차선도 적게 검출</strong>. 큰 receptive field 와 추가 파라미터가
+    한국 도시 도로 dashcam 일반화에는 오히려 장벽으로 작용하는 것으로 추정 (TuSimple/CULane 학습 데이터에 over-tuning 가능성).
+  </p>
+
+  <img class="chart" src="chart_twin_variants.png" alt="TwinLiteNet+ variant comparison">
+
+  <table>
+    <thead><tr><th>변형</th><th class="num">평균 추론 (ms)</th><th class="num">FPS</th><th class="num">평균 차선</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Nano (0.03M)</strong></td><td class="num">25.0</td><td class="num best">40.0</td><td class="num best">5.54</td></tr>
+      <tr><td>Small</td><td class="num">27.7</td><td class="num">36.1</td><td class="num">5.22</td></tr>
+      <tr><td>Medium</td><td class="num">29.7</td><td class="num">33.7</td><td class="num">4.36</td></tr>
+      <tr><td>Large</td><td class="num">34.2</td><td class="num">29.3</td><td class="num">3.65</td></tr>
+    </tbody>
+  </table>
+
+  <h3>4-way 동시 비교 영상</h3>
+  <div class="video-row">
+    <video src="01_clear_twin_variants.mp4" controls muted preload="metadata"></video>
+    <div class="video-caption">상단: Nano / Small. 하단: Medium / Large. 차선 라인이 점점 끊기거나 줄어드는 게 시각적으로 확인됨.</div>
+  </div>
+
+  <div class="key-findings">
+    <div class="finding good">
+      <strong>인사이트.</strong> 임베디드 환경 (CCRD AUTONG → Jetson Orin Nano) 에서는 단순히 "큰 모델 = 좋은 모델" 이 아님.
+      <strong>Nano 가 모든 지표에서 베스트</strong> — 빠르고, 작고, 더 잘 검출. fine-tuning 시 base 로 Nano 채택 권장.
+    </div>
+    <div class="finding">
+      <strong>참고.</strong> 본 측정은 <strong>PyTorch + FP16</strong> baseline. 양산 시 TensorRT (FP16 → 1.3-1.7x, INT8 양자화 → 추가 1.5-2x) 적용 시
+      Jetson Orin Nano 에서도 30-50 FPS 임베디드 동작 가능 추정.
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>한계 + 개선 방향 (CCRD 환경 적용 관점)</h2>
+
+  <h3>현재 한계</h3>
+  <div class="key-findings">
+    <div class="finding warn"><strong>도시 도로 학습 모델</strong> → CCRD 의 갓길 / 비포장 / 가드레일 시공 환경 직접 적용 어려움. Fine-tuning 필요.</div>
+    <div class="finding warn"><strong>차선 페인트 부재 환경</strong> 에선 silent failure — 모델이 "검출 실패" 신호를 명확히 안 줌. 별도 confidence threshold + temporal consistency check 필요.</div>
+    <div class="finding warn"><strong>악천후 영상 노이즈</strong> 단독으로는 운전 불가. 센서 fusion (RTK GPS + IMU + Lidar) 으로 보완해야 함.</div>
+  </div>
+
+  <h3>제안하는 개선 경로 (CCRD 통합 시)</h3>
+  <div class="key-findings">
+    <div class="finding good"><strong>1) 자사 시공 영상으로 fine-tuning</strong> — TwinLiteNet+ Nano 가 작아서 회사 보유 dashcam 1000~2000 클립으로 빠른 재학습 가능</div>
+    <div class="finding good"><strong>2) 임베디드 양자화 (FP16 → INT8)</strong> — Jetson Orin Nano 의 TensorRT 로 추가 1.5~2x 속도 + 메모리 50% 감소</div>
+    <div class="finding good"><strong>3) 센서 fusion 아키텍처</strong> — lane detection 은 "보조 신호" 로, RTK GPS 의 도로 좌표를 primary 로 사용하는 통합 설계 권장</div>
+    <div class="finding good"><strong>4) 라이선스 정합</strong> — 상용 통합엔 MIT 라이선스 (HybridNets, TwinLiteNet+) 권장. YOLOPv2 (GPLv3) 는 소스 공개 의무 발생</div>
+  </div>
+</section>
+
+<section>
+  <h2>코드 + 보고서</h2>
+  <p class="lead">전체 추론 스크립트, 측정 결과 CSV, 상세 보고서 (10 쪽 분량) 는 GitHub 에 공개. 본 페이지는 핵심 요약.</p>
+  <ul style="color: var(--muted);">
+    <li>📊 <code>docs/REPORT.md</code> — 10 쪽 상세 분석</li>
+    <li>📈 <code>results/comparison.csv</code> — 모든 측정값 (frame-level)</li>
+    <li>🛠️ <code>src/infer_*.py</code> — 모델 별 추론 스크립트 5 종</li>
+    <li>🐳 <code>docker-compose.yml</code> — 재현 환경 (CUDA 12.1 + torch 2.1)</li>
+  </ul>
+</section>
+
+</main>
+
+<footer>
+  김정석 · 2026-04-30 · (주)충청 (CCRD) AI/IT 개발 파트너 지원 자료
+</footer>
+
+</body>
+</html>
