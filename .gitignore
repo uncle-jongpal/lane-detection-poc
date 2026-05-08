@@ -26,3 +26,8 @@ __pycache__/
 # slides_assets — HTML + 차트는 commit, mp4 는 제외 (용량)
 slides_assets/*.mp4
 
+
+
+# ONNX 는 portable — commit 허용
+!weights/twinlitenetplus/*.onnx
+

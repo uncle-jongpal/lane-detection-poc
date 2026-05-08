@@ -100,11 +100,11 @@ def main():
         import onnx
         m = onnx.load(str(output_path))
         onnx.checker.check_model(m)
-        print(f"[export] ✓ ONNX 검증 통과 — opset {m.opset_import[0].version}")
+        print(f"[export] [OK] ONNX 검증 통과 - opset {m.opset_import[0].version}")
     except ImportError:
-        print("[export] onnx 미설치 (pip install onnx) — 검증 스킵")
+        print("[export] onnx 미설치 (pip install onnx) - 검증 스킵")
     except Exception as e:
-        print(f"[export] ⚠ ONNX 검증 경고: {e}")
+        print(f"[export] [WARN] ONNX 검증 경고: {e}")
 
 
 if __name__ == "__main__":
