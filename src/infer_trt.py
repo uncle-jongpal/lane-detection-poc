@@ -170,7 +170,7 @@ def main():
         # output mp4 만드는 경우 lane overlay
         if writer is not None:
             # output 이름 매칭 (TwinLiteNet+ 기준 'lane' 출력)
-            lane_logits = out.get("lane") or list(out.values())[-1]
+            lane_logits = out["lane"] if "lane" in out else list(out.values())[-1]
             lane_mask = postprocess_lane_mask(lane_logits)
             # mask 를 원본 해상도로 리사이즈
             lane_mask_full = cv2.resize(lane_mask, (W, H), interpolation=cv2.INTER_NEAREST)
