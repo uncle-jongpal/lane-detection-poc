@@ -8,6 +8,9 @@ results/*.csv
 weights/*
 !weights/README.md
 !weights/.gitkeep
+!weights/twinlitenetplus/
+weights/twinlitenetplus/*
+!weights/twinlitenetplus/*.onnx
 
 # 모델 외부 repo (Dockerfile 에서 build 시 clone)
 external/
@@ -25,9 +28,4 @@ __pycache__/
 
 # slides_assets — HTML + 차트는 commit, mp4 는 제외 (용량)
 slides_assets/*.mp4
-
-
-
-# ONNX 는 portable — commit 허용
-!weights/twinlitenetplus/*.onnx
 
