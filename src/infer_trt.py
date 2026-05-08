@@ -16,7 +16,6 @@ Notes:
 - 입력 shape (1, 3, 384, 640) 고정 — export_onnx.py 와 일치 필요.
 - 출력 두 개: drivable area + lane mask (TwinLiteNet+ multi-task).
 """
-from __future__ import annotations
 import argparse
 import json
 import time
@@ -26,7 +25,7 @@ import cv2
 import numpy as np
 
 
-def load_engine(engine_path: Path):
+def load_engine(engine_path):
     import tensorrt as trt
     logger = trt.Logger(trt.Logger.WARNING)
     runtime = trt.Runtime(logger)
